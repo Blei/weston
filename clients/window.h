@@ -73,6 +73,9 @@ display_get_output(struct display *display);
 uint32_t
 display_get_serial(struct display *display);
 
+int
+display_get_epoll_fd(struct display *display);
+
 typedef void (*display_output_handler_t)(struct output *output, void *data);
 
 /*
@@ -133,6 +136,13 @@ display_defer(struct display *display, struct task *task);
 void
 display_watch_fd(struct display *display,
 		 int fd, uint32_t events, struct task *task);
+
+void
+display_iteration_deferred(struct display *display);
+
+void
+display_iteration_epoll(struct display *display,
+			int timeout);
 
 void
 display_run(struct display *d);

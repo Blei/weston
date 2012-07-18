@@ -3675,6 +3675,12 @@ display_get_serial(struct display *display)
 	return display->serial;
 }
 
+int
+display_get_epoll_fd(struct display *display)
+{
+	return display->epoll_fd;
+}
+
 EGLDisplay
 display_get_egl_display(struct display *d)
 {
@@ -3770,34 +3776,49 @@ display_watch_fd(struct display *display,
 }
 
 void
-display_run(struct display *display)
+display_iteration_deferred(struct display *display)
+{
+	struct task *task;
+
+	wl_display_flush(display->display);
+
+	while (!wl_list_empty(&display->deferred_list)) {
+		task = container_of(display->deferred_list.next,
+				    struct task, link);
+		wl_list_remove(&task->link);
+		task->run(task, 0);
+	}
+}
+
+void
+display_iteration_epoll(struct display *display,
+			int timeout)
 {
 	struct task *task;
 	struct epoll_event ep[16];
 	int i, count;
 
+	wl_display_flush(display->display);
+
+	count = epoll_wait(display->epoll_fd,
+			   ep, ARRAY_LENGTH(ep), timeout);
+	for (i = 0; i < count; i++) {
+		task = ep[i].data.ptr;
+		task->run(task, ep[i].events);
+	}
+}
+
+void
+display_run(struct display *display)
+{
 	display->running = 1;
 	while (1) {
-		wl_display_flush(display->display);
-
-		while (!wl_list_empty(&display->deferred_list)) {
-			task = container_of(display->deferred_list.next,
-					    struct task, link);
-			wl_list_remove(&task->link);
-			task->run(task, 0);
-		}
+		display_iteration_deferred(display);
 
 		if (!display->running)
 			break;
 
-		wl_display_flush(display->display);
-
-		count = epoll_wait(display->epoll_fd,
-				   ep, ARRAY_LENGTH(ep), -1);
-		for (i = 0; i < count; i++) {
-			task = ep[i].data.ptr;
-			task->run(task, ep[i].events);
-		}
+		display_iteration_epoll(display, -1);
 	}
 }
 
