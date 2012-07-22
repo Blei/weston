@@ -48,8 +48,14 @@
       <arg name="text" type="string"/>
       <arg name="index" type="uint"/>
     </request>
+    <request name="preedit_string">
+      <arg name="text" type="string"/>
+      <arg name="index" type="uint"/>
+    </request>
     <request name="request_keyboard">
       <arg name="keyboard" type="new_id" interface="wl_keyboard"/>
     </request>
+
+    <event name="reset"/>
   </interface>
 </protocol>

@@ -54,15 +54,19 @@ deactivate_text_model(struct text_model *text_model)
 {
 	struct weston_compositor *ec = text_model->input_method->ec;
 	struct wl_keyboard_grab *grab = &text_model->grab;
+	struct input_method *input_method = text_model->input_method;
 
 	if (grab->keyboard && (grab->keyboard->grab == grab)) {
 		wl_keyboard_end_grab(grab->keyboard);
 		weston_log("end keyboard grab\n");
 	}
 
-	if (text_model->input_method->active_model == text_model) {
-		text_model->input_method->active_model = NULL;
+	if (input_method->active_model == text_model) {
+		input_method->active_model = NULL;
 		wl_signal_emit(&ec->hide_input_panel_signal, ec);
+		if (input_method->input_method_binding) {
+			input_method_send_reset(input_method->input_method_binding);
+		}
 	}
 }
 
@@ -261,6 +265,20 @@ input_method_commit_string(struct wl_client *client,
 }
 
 static void
+input_method_preedit_string(struct wl_client *client,
+			    struct wl_resource *resource,
+			    const char *text,
+			    uint32_t index)
+{
+	struct input_method *input_method = resource->data;
+
+	if (input_method->active_model) {
+		text_model_send_preedit_string(
+		    &input_method->active_model->resource, text, index);
+	}
+}
+
+static void
 unbind_keyboard_binding(struct wl_resource *resource)
 {
 	struct input_method *input_method = resource->data;
@@ -300,6 +318,7 @@ input_method_request_keyboard(struct wl_client *client,
 
 static const struct input_method_interface input_method_implementation = {
 	input_method_commit_string,
+	input_method_preedit_string,
 	input_method_request_keyboard
 };
 

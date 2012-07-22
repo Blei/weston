@@ -31,9 +31,16 @@
 #include "window.h"
 #include "text-client-protocol.h"
 
+struct buffer {
+	char *data;
+	size_t length;
+	size_t capacity;
+};
+
 struct text_entry {
 	struct widget *widget;
-	char *text;
+	struct buffer text;
+	struct buffer preedit;
 	int active;
 	struct rectangle allocation;
 	struct text_model *model;
@@ -49,12 +56,41 @@ struct editor {
 };
 
 static void
-text_entry_append(struct text_entry *entry, const char *text)
+buffer_append(struct buffer *buffer, const char *text)
 {
-	entry->text = realloc(entry->text, strlen(entry->text) + strlen(text) + 1);
-	strcat(entry->text, text);
+	size_t new_length = strlen(text) + buffer->length;
+	if (new_length > buffer->capacity) {
+		buffer->data = realloc(buffer->data, new_length);
+		buffer->capacity = new_length;
+	}
+	strcat(buffer->data, text);
+	buffer->length = new_length;
 }
 
+static void
+buffer_set(struct buffer *buffer, const char *text)
+{
+	size_t length = strlen(text) + 1;
+	if (length > buffer->length) {
+		buffer->data = realloc(buffer->data, length);
+		buffer->capacity = length;
+	}
+	strcpy(buffer->data, text);
+	buffer->length = length;
+}
+
+static void
+text_entry_commit(struct text_entry *entry, const char *text)
+{
+	buffer_set(&entry->preedit, "");
+	buffer_append(&entry->text, text);
+}
+
+static void
+text_entry_preedit(struct text_entry *entry, const char *text)
+{
+	buffer_set(&entry->preedit, text);
+}
 
 static void
 text_model_commit_string(void *data,
@@ -64,13 +100,27 @@ text_model_commit_string(void *data,
 {
 	struct text_entry *entry = data;
 
-	text_entry_append(entry, text);	
+	text_entry_commit(entry, text);
+
+	widget_schedule_redraw(entry->widget);
+}
+
+static void
+text_model_preedit_string(void *data,
+			  struct text_model *text_model,
+			  const char *text,
+			  uint32_t index)
+{
+	struct text_entry *entry = data;
+
+	text_entry_preedit(entry, text);
 
 	widget_schedule_redraw(entry->widget);
 }
 
 static const struct text_model_listener text_model_listener = {
-	text_model_commit_string
+	text_model_commit_string,
+	text_model_preedit_string
 };
 
 static struct text_entry*
@@ -84,7 +134,10 @@ text_entry_create(struct editor *editor, const char *text)
 	surface = window_get_wl_surface(editor->window);
 
 	entry->widget = editor->widget;
-	entry->text = strdup(text);
+	entry->text.data = strdup(text);
+	entry->text.length = entry->text.capacity = strlen(text) + 1;
+	entry->preedit.data = calloc(1, 1);
+	entry->preedit.length = entry->preedit.capacity = 1;
 	entry->active = 0;
 	entry->model = text_model_manager_create_text_model(editor->text_model_manager, surface);
 	text_model_add_listener(entry->model, &text_model_listener, entry);
@@ -96,7 +149,8 @@ static void
 text_entry_destroy(struct text_entry *entry)
 {
 	text_model_destroy(entry->model);
-	free(entry->text);
+	free(entry->text.data);
+	free(entry->preedit.data);
 	free(entry);
 }
 
@@ -126,7 +180,8 @@ text_entry_draw(struct text_entry *entry, cairo_t *cr)
 	cairo_set_font_size(cr, 14);
 
 	cairo_translate(cr, 10, entry->allocation.height / 2);
-	cairo_show_text(cr, entry->text);
+	cairo_show_text(cr, entry->text.data);
+	cairo_show_text(cr, entry->preedit.data);
 
 	cairo_restore(cr);
 }
@@ -211,6 +266,10 @@ text_entry_activate(struct text_entry *entry)
 static void
 text_entry_deactivate(struct text_entry *entry)
 {
+	if (entry->preedit.length > 1) {
+		buffer_set(&entry->preedit, "");
+		widget_schedule_redraw(entry->widget);
+	}
 	text_model_deactivate(entry->model);
 }
 
