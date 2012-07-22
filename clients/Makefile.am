@@ -53,6 +53,7 @@ clients_programs =				\
 	eventdemo				\
 	clickdot				\
 	editor					\
+	hiragana-ime				\
 	keyboard				\
 	$(full_gl_client_programs)
 
@@ -105,6 +106,12 @@ editor_SOURCES = 				\
 	text-protocol.c				\
 	text-client-protocol.h
 editor_LDADD = $(toolkit_libs)
+
+hiragana_ime_SOURCES = 				\
+	hiragana-ime.c				\
+	text-protocol.c				\
+	text-client-protocol.h
+hiragana_ime_LDADD = $(toolkit_libs)
 
 keyboard_SOURCES = 				\
 	keyboard.c				\

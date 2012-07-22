@@ -26,6 +26,7 @@ weston-terminal
 weston-screensaver
 wscreensaver
 editor
+hiragana-ime
 text-protocol.c
 text-client-protocol.h
 keyboard
