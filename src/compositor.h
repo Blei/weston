@@ -294,6 +294,9 @@ struct weston_compositor {
 	/* There can be more than one, but not right now... */
 	struct weston_seat *seat;
 
+	struct input_method *input_method;
+	struct wl_listener input_method_keyboard_focus_listener;
+
 	struct weston_layer fade_layer;
 	struct weston_layer cursor_layer;
 
@@ -739,7 +742,7 @@ clipboard_create(struct weston_seat *seat);
 void
 text_cursor_position_notifier_create(struct weston_compositor *ec);
 
-void
+struct input_method *
 input_method_create(struct weston_compositor *ec);
 
 struct weston_process;

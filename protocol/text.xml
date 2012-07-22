@@ -1,5 +1,5 @@
 <protocol name="text">
-   <interface name="text_model" version="1">
+  <interface name="text_model" version="1">
     <request name="set_surrounding_text">
       <arg name="text" type="string"/>
     </request>
@@ -47,6 +47,9 @@
     <request name="commit_string">
       <arg name="text" type="string"/>
       <arg name="index" type="uint"/>
+    </request>
+    <request name="request_keyboard">
+      <arg name="keyboard" type="new_id" interface="wl_keyboard"/>
     </request>
   </interface>
 </protocol>

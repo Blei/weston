@@ -3425,6 +3425,11 @@ shell_init(struct weston_compositor *ec)
 		wl_signal_add(&ec->seat->seat.pointer->focus_signal,
 			      &shell->pointer_focus_listener);
 
+	if (ec->seat->seat.keyboard)
+		wl_signal_add(&ec->seat->seat.keyboard->focus_signal,
+			      &ec->input_method_keyboard_focus_listener);
+
+
 	shell_add_bindings(ec, shell);
 
 	return 0;
