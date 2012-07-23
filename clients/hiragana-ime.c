@@ -318,6 +318,29 @@ update_state(hiragana_state state,
 }
 
 static void
+send_preedit(struct hiragana_ime *ime, const char *str, uint32_t index)
+{
+	size_t len = strlen(str);
+	uint32_t color;
+
+	fprintf(stderr, "preedit '%s'\n", str);
+	input_method_preedit_string(ime->input_method, str, index);
+	if (len > 0) {
+		input_method_preedit_styling(ime->input_method,
+					     TEXT_MODEL_PREEDIT_STYLE_TYPE_UNDERLINE,
+					     TEXT_MODEL_PREEDIT_UNDERLINE_TYPE_SINGLE,
+					     0,
+					     len);
+		color = 0x86dde9;
+		input_method_preedit_styling(ime->input_method,
+					     TEXT_MODEL_PREEDIT_STYLE_TYPE_BACKGROUND,
+					     color,
+					     0,
+					     len);
+	}
+}
+
+static void
 ime_handle_key(struct hiragana_ime *ime, uint32_t key, uint32_t sym,
 	       enum wl_keyboard_key_state state)
 {
@@ -328,7 +351,7 @@ ime_handle_key(struct hiragana_ime *ime, uint32_t key, uint32_t sym,
 		ime->on = !ime->on;
 		fprintf(stderr, "turning ime %s\n", ime->on ? "on" : "off");
 		if (!ime->on) {
-			input_method_preedit_string(ime->input_method, "", -1);
+			send_preedit(ime, "", 0);
 			ime->state = STATE_EMPTY;
 		}
 		return;
@@ -349,8 +372,7 @@ ime_handle_key(struct hiragana_ime *ime, uint32_t key, uint32_t sym,
 
 	if (ime->state != STATE_EMPTY || !(output && *output)) {
 		const char *preedit_string = state_to_preedit(ime->state);
-		fprintf(stderr, "preedit '%s'\n", preedit_string);
-		input_method_preedit_string(ime->input_method, preedit_string, -1);
+		send_preedit(ime, preedit_string, -1);
 	}
 }
 
