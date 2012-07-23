@@ -279,6 +279,23 @@ input_method_preedit_string(struct wl_client *client,
 }
 
 static void
+input_method_preedit_styling(struct wl_client *client,
+			     struct wl_resource *resource,
+			     uint32_t type,
+			     uint32_t value,
+			     uint32_t start,
+			     uint32_t end)
+{
+	struct input_method *input_method = resource->data;
+
+	if (input_method->active_model) {
+		text_model_send_preedit_styling(
+		    &input_method->active_model->resource,
+		    type, value, start, end);
+	}
+}
+
+static void
 unbind_keyboard_binding(struct wl_resource *resource)
 {
 	struct input_method *input_method = resource->data;
@@ -319,6 +336,7 @@ input_method_request_keyboard(struct wl_client *client,
 static const struct input_method_interface input_method_implementation = {
 	input_method_commit_string,
 	input_method_preedit_string,
+	input_method_preedit_styling,
 	input_method_request_keyboard
 };
 

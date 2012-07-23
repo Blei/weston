@@ -26,10 +26,51 @@
       <arg name="index" type="uint"/>
     </event>
     <event name="preedit_string">
+      <description summary="update the preedit string">
+        Replaces the current preedit string. All existing preedit styles have
+        to be dropped.
+      </description>
       <arg name="text" type="string"/>
       <arg name="index" type="uint"/>
     </event>
-    <event name="preedit_styling"/>
+
+    <enum name="preedit_style_type">
+      <description summary="the type of a preedit style">
+        The type of the preedit style. Depending on the type, the value of the
+        event contains different data.
+
+        "underline": The value is of type preedit_underline_type.
+
+        "foreground" and "background": the value is a color in the format "0RGB"
+        from MSB to LSB.
+      </description>
+      <entry name="underline" value="0"/>
+      <entry name="foreground" value="1"/>
+      <entry name="background" value="2"/>
+    </enum>
+
+    <enum name="preedit_underline_type">
+      <entry name="none" value="0"/>
+      <entry name="single" value="1"/>
+      <entry name="double" value="2"/>
+      <entry name="low" value="3"/>
+      <entry name="error" value="4"/>
+    </enum>
+
+    <event name="preedit_styling">
+      <description summary="adds a new preedit style component">
+        Adds a new preedit style component to the current preedit string.
+        All existing preedit styles must be dropped when a new preedit string
+        is received.
+
+        start and end are in number of bytes.
+      </description>
+      <arg name="type" type="uint"/>
+      <arg name="value" type="uint"/>
+      <arg name="start" type="uint"/>
+      <arg name="end" type="uint"/>
+    </event>
+
     <event name="key"/>
     <event name="selection_replacement"/>
     <event name="direction"/>
@@ -51,6 +92,12 @@
     <request name="preedit_string">
       <arg name="text" type="string"/>
       <arg name="index" type="uint"/>
+    </request>
+    <request name="preedit_styling">
+      <arg name="type" type="uint"/>
+      <arg name="value" type="uint"/>
+      <arg name="start" type="uint"/>
+      <arg name="end" type="uint"/>
     </request>
     <request name="request_keyboard">
       <arg name="keyboard" type="new_id" interface="wl_keyboard"/>

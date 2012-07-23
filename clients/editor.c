@@ -21,6 +21,7 @@
  */
 
 #include <assert.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -42,6 +43,7 @@ struct text_entry {
 	struct widget *widget;
 	struct buffer text;
 	struct buffer preedit;
+	PangoAttrList *attr_list;
 	int active;
 	struct rectangle allocation;
 	struct text_model *model;
@@ -85,12 +87,16 @@ text_entry_commit(struct text_entry *entry, const char *text)
 {
 	buffer_set(&entry->preedit, "");
 	buffer_append(&entry->text, text);
+	pango_attr_list_unref(entry->attr_list);
+	entry->attr_list = NULL;
 }
 
 static void
 text_entry_preedit(struct text_entry *entry, const char *text)
 {
 	buffer_set(&entry->preedit, text);
+	pango_attr_list_unref(entry->attr_list);
+	entry->attr_list = NULL;
 }
 
 static void
@@ -119,9 +125,81 @@ text_model_preedit_string(void *data,
 	widget_schedule_redraw(entry->widget);
 }
 
+static PangoAttribute *
+convert_to_pango_attribute(uint32_t type,
+			   uint32_t value,
+			   uint32_t start,
+			   uint32_t end)
+{
+	PangoAttribute *attr;
+	PangoUnderline underline_type;
+
+	guint16 red   = (value & 0xff0000) >> 8;
+	guint16 green = value & 0xff00;
+	guint16 blue  = (value & 0xff) << 8;
+
+	switch (type) {
+	case TEXT_MODEL_PREEDIT_STYLE_TYPE_UNDERLINE:
+		switch (value) {
+		case TEXT_MODEL_PREEDIT_UNDERLINE_TYPE_NONE:
+			underline_type = PANGO_UNDERLINE_NONE;
+			break;
+		case TEXT_MODEL_PREEDIT_UNDERLINE_TYPE_SINGLE:
+			underline_type = PANGO_UNDERLINE_SINGLE;
+			break;
+		case TEXT_MODEL_PREEDIT_UNDERLINE_TYPE_DOUBLE:
+			underline_type = PANGO_UNDERLINE_DOUBLE;
+			break;
+		case TEXT_MODEL_PREEDIT_UNDERLINE_TYPE_LOW:
+			underline_type = PANGO_UNDERLINE_LOW;
+			break;
+		case TEXT_MODEL_PREEDIT_UNDERLINE_TYPE_ERROR:
+			underline_type = PANGO_UNDERLINE_ERROR;
+			break;
+		default:
+			assert(false && "unknown underline type");
+		}
+		attr = pango_attr_underline_new(underline_type);
+		break;
+	case TEXT_MODEL_PREEDIT_STYLE_TYPE_FOREGROUND:
+		attr = pango_attr_foreground_new(red, green, blue);
+		break;
+	case TEXT_MODEL_PREEDIT_STYLE_TYPE_BACKGROUND:
+		attr = pango_attr_background_new(red, green, blue);
+		break;
+	default:
+		assert(false && "unknown preedit style type");
+	}
+
+	attr->start_index = start;
+	attr->end_index   = end;
+	return attr;
+}
+
+static void
+text_model_preedit_styling(void *data,
+			   struct text_model *text_model,
+			   uint32_t type,
+			   uint32_t value,
+			   uint32_t start,
+			   uint32_t end)
+{
+	struct text_entry *entry = data;
+
+	PangoAttribute *attr =
+		convert_to_pango_attribute(type, value, start, end);
+	if (!entry->attr_list) {
+		entry->attr_list = pango_attr_list_new();
+	}
+	pango_attr_list_insert(entry->attr_list, attr);
+
+	widget_schedule_redraw(entry->widget);
+}
+
 static const struct text_model_listener text_model_listener = {
 	text_model_commit_string,
-	text_model_preedit_string
+	text_model_preedit_string,
+	text_model_preedit_styling
 };
 
 static struct text_entry*
@@ -139,6 +217,7 @@ text_entry_create(struct editor *editor, const char *text)
 	entry->text.length = entry->text.capacity = strlen(text) + 1;
 	entry->preedit.data = calloc(1, 1);
 	entry->preedit.length = entry->preedit.capacity = 1;
+	entry->attr_list = NULL;
 	entry->active = 0;
 	entry->model = text_model_manager_create_text_model(editor->text_model_manager, surface);
 	text_model_add_listener(entry->model, &text_model_listener, entry);
@@ -192,6 +271,7 @@ text_entry_draw(struct text_entry *entry, cairo_t *cr)
 	weight_attr->end_index   = PANGO_ATTR_INDEX_TO_TEXT_END;
 	pango_attr_list_insert(attrs, weight_attr);
 	pango_layout_set_attributes(layout, attrs);
+	pango_attr_list_unref(attrs);
 
 	pango_layout_set_text(layout, entry->text.data, -1);
 	pango_layout_get_size(layout, &width, &height);
@@ -204,10 +284,10 @@ text_entry_draw(struct text_entry *entry, cairo_t *cr)
 	pango_cairo_show_layout(cr, layout);
 
 	pango_layout_set_text(layout, entry->preedit.data, -1);
+	pango_layout_set_attributes(layout, entry->attr_list);
 	cairo_translate(cr, text_width, 0);
 	pango_cairo_show_layout(cr, layout);
 
-	pango_attr_list_unref(attrs);
 	g_object_unref(layout);
 
 	cairo_restore(cr);
