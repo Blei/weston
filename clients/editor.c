@@ -27,6 +27,7 @@
 
 #include <linux/input.h>
 #include <cairo.h>
+#include <pango/pangocairo.h>
 
 #include "window.h"
 #include "text-client-protocol.h"
@@ -157,6 +158,14 @@ text_entry_destroy(struct text_entry *entry)
 static void
 text_entry_draw(struct text_entry *entry, cairo_t *cr)
 {
+	PangoLayout *layout;
+	PangoAttrList *attrs;
+	PangoAttribute *weight_attr;
+
+	int width, height;
+	double text_width, text_height;
+	double text_start_height;
+
 	cairo_save(cr);
 	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 
@@ -174,14 +183,32 @@ text_entry_draw(struct text_entry *entry, cairo_t *cr)
 	}
 
 	cairo_set_source_rgb(cr, 0, 0, 0);
-	cairo_select_font_face(cr, "sans",
-			       CAIRO_FONT_SLANT_NORMAL,
-			       CAIRO_FONT_WEIGHT_BOLD);
-	cairo_set_font_size(cr, 14);
 
-	cairo_translate(cr, 10, entry->allocation.height / 2);
-	cairo_show_text(cr, entry->text.data);
-	cairo_show_text(cr, entry->preedit.data);
+	layout = pango_cairo_create_layout(cr);
+	attrs = pango_attr_list_new();
+
+	weight_attr = pango_attr_weight_new(PANGO_WEIGHT_BOLD);
+	weight_attr->start_index = PANGO_ATTR_INDEX_FROM_TEXT_BEGINNING;
+	weight_attr->end_index   = PANGO_ATTR_INDEX_TO_TEXT_END;
+	pango_attr_list_insert(attrs, weight_attr);
+	pango_layout_set_attributes(layout, attrs);
+
+	pango_layout_set_text(layout, entry->text.data, -1);
+	pango_layout_get_size(layout, &width, &height);
+
+	text_width = (double) width / PANGO_SCALE;
+	text_height = (double) height / PANGO_SCALE;
+	text_start_height = (entry->allocation.height - text_height) / 2;
+
+	cairo_translate(cr, 10, text_start_height);
+	pango_cairo_show_layout(cr, layout);
+
+	pango_layout_set_text(layout, entry->preedit.data, -1);
+	cairo_translate(cr, text_width, 0);
+	pango_cairo_show_layout(cr, layout);
+
+	pango_attr_list_unref(attrs);
+	g_object_unref(layout);
 
 	cairo_restore(cr);
 }

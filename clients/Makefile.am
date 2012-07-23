@@ -106,6 +106,8 @@ editor_SOURCES = 				\
 	text-protocol.c				\
 	text-client-protocol.h
 editor_LDADD = $(toolkit_libs)
+editor_LDFLAGS = $(PANGOCAIRO_LIBS)
+editor_CFLAGS = $(PANGOCAIRO_CFLAGS)
 
 hiragana_ime_SOURCES = 				\
 	hiragana-ime.c				\
