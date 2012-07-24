@@ -229,42 +229,17 @@ consonant_to_state(uint32_t sym)
 	}
 }
 
-static void
+static bool
 update_state(hiragana_state state,
 	     uint32_t sym,
 	     hiragana_state *new_state,
 	     const char **output)
 {
-	*output = NULL;
-	if (sym == 'y') {
+	int vi;
+
+	if (sym == XKB_KEY_BackSpace) {
 		switch (state) {
-		case STATE_B: *new_state = STATE_BY; return;
-		case STATE_D: *new_state = STATE_DY; return;
-		case STATE_F: *new_state = STATE_FY; return;
-		case STATE_G: *new_state = STATE_GY; return;
-		case STATE_H: *new_state = STATE_HY; return;
-		case STATE_J: *new_state = STATE_JY; return;
-		case STATE_K: *new_state = STATE_KY; return;
-		case STATE_L: *new_state = STATE_LY; return;
-		case STATE_M: *new_state = STATE_MY; return;
-		case STATE_N: *new_state = STATE_NY; return;
-		case STATE_P: *new_state = STATE_PY; return;
-		case STATE_R: *new_state = STATE_RY; return;
-		case STATE_S: *new_state = STATE_SY; return;
-		case STATE_T: *new_state = STATE_TY; return;
-		case STATE_V: *new_state = STATE_VY; return;
-		case STATE_X: *new_state = STATE_XY; return;
-		case STATE_Z: *new_state = STATE_ZY; return;
-		default: break; // continue normal handling
-		}
-	} else if (sym == 'h') {
-		switch (state) {
-		case STATE_C: *new_state = STATE_CH; return;
-		case STATE_S: *new_state = STATE_SH; return;
-		default: break; // continue normal handling
-		}
-	} else if (sym == XKB_KEY_BackSpace) {
-		switch (state) {
+		case STATE_EMPTY: return false;
 		case STATE_CH: *new_state = STATE_C; break;
 		case STATE_SH: *new_state = STATE_S; break;
 		case STATE_BY: *new_state = STATE_B; break;
@@ -286,10 +261,46 @@ update_state(hiragana_state state,
 		case STATE_ZY: *new_state = STATE_Z; break;
 		default:       *new_state = STATE_EMPTY; break;
 		}
-		return;
+		return true;
 	}
 
-	int vi = vowel_index(sym);
+	if (sym < 'a' || sym > 'z') {
+		*output = state_to_preedit(state);
+		*new_state = STATE_EMPTY;
+		return false;
+	}
+
+	*output = NULL;
+	if (sym == 'y') {
+		switch (state) {
+		case STATE_B: *new_state = STATE_BY; return true;
+		case STATE_D: *new_state = STATE_DY; return true;
+		case STATE_F: *new_state = STATE_FY; return true;
+		case STATE_G: *new_state = STATE_GY; return true;
+		case STATE_H: *new_state = STATE_HY; return true;
+		case STATE_J: *new_state = STATE_JY; return true;
+		case STATE_K: *new_state = STATE_KY; return true;
+		case STATE_L: *new_state = STATE_LY; return true;
+		case STATE_M: *new_state = STATE_MY; return true;
+		case STATE_N: *new_state = STATE_NY; return true;
+		case STATE_P: *new_state = STATE_PY; return true;
+		case STATE_R: *new_state = STATE_RY; return true;
+		case STATE_S: *new_state = STATE_SY; return true;
+		case STATE_T: *new_state = STATE_TY; return true;
+		case STATE_V: *new_state = STATE_VY; return true;
+		case STATE_X: *new_state = STATE_XY; return true;
+		case STATE_Z: *new_state = STATE_ZY; return true;
+		default: break; // continue normal handling
+		}
+	} else if (sym == 'h') {
+		switch (state) {
+		case STATE_C: *new_state = STATE_CH; return true;
+		case STATE_S: *new_state = STATE_SH; return true;
+		default: break; // continue normal handling
+		}
+	}
+
+	vi = vowel_index(sym);
 
 	// N needs special handling
 	if (state == STATE_N) {
@@ -305,16 +316,15 @@ update_state(hiragana_state state,
 			*new_state = consonant_to_state(sym);
 			*output = "ん";
 		}
-		return;
-	}
-
-	if (vi >= 0) {
+	} else if (vi >= 0) {
 		*output = vowel_table[state][vi];
 		*new_state = STATE_EMPTY;
 	} else {
 		*output = state_to_preedit(state);
 		*new_state = consonant_to_state(sym);
 	}
+
+	return true;
 }
 
 static void
@@ -340,12 +350,16 @@ send_preedit(struct hiragana_ime *ime, const char *str, uint32_t index)
 	}
 }
 
-static void
+static bool
 ime_handle_key(struct hiragana_ime *ime, uint32_t key, uint32_t sym,
 	       enum wl_keyboard_key_state state)
 {
+	const char *output;
+	bool handled;
+	const char *preedit_string;
+
 	if (state != WL_KEYBOARD_KEY_STATE_PRESSED)
-		return;
+		return false;
 
 	if (sym == ' ' && (ime->modifiers & ime->xkb.control_mask)) {
 		ime->on = !ime->on;
@@ -354,16 +368,14 @@ ime_handle_key(struct hiragana_ime *ime, uint32_t key, uint32_t sym,
 			send_preedit(ime, "", 0);
 			ime->state = STATE_EMPTY;
 		}
-		return;
+		return true;
 	}
 
 	if (!ime->on)
-		return;
+		return false;
 
-	const char *output = NULL;
-	if (sym == XKB_KEY_BackSpace || (sym >= 'a' && sym <= 'z')) {
-		update_state(ime->state, sym, &ime->state, &output);
-	}
+	output = NULL;
+	handled = update_state(ime->state, sym, &ime->state, &output);
 
 	if (output && *output) {
 		fprintf(stderr, "committing '%s'\n", output);
@@ -371,9 +383,11 @@ ime_handle_key(struct hiragana_ime *ime, uint32_t key, uint32_t sym,
 	}
 
 	if (ime->state != STATE_EMPTY || !(output && *output)) {
-		const char *preedit_string = state_to_preedit(ime->state);
+		preedit_string = state_to_preedit(ime->state);
 		send_preedit(ime, preedit_string, -1);
 	}
+
+	return handled;
 }
 
 static void reset_hiragana_ime(struct hiragana_ime *ime)
@@ -484,7 +498,10 @@ input_method_key(void *data,
 	if (num_syms == 1)
 		sym = syms[0];
 
-	ime_handle_key(ime, key, sym, state);
+	if (!ime_handle_key(ime, key, sym, state)) {
+		input_method_forward_key(ime->input_method,
+					 time, key, state_w);
+	}
 }
 
 static void
