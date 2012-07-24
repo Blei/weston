@@ -102,6 +102,11 @@
     <request name="request_keyboard">
       <arg name="keyboard" type="new_id" interface="wl_keyboard"/>
     </request>
+    <request name="forward_key">
+      <arg name="time" type="uint"/>
+      <arg name="key" type="uint"/>
+      <arg name="state" type="uint"/>
+    </request>
 
     <event name="reset"/>
   </interface>

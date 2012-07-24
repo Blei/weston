@@ -83,6 +83,22 @@ buffer_set(struct buffer *buffer, const char *text)
 }
 
 static void
+buffer_delete_last_character(struct buffer *buffer)
+{
+	char *prev_char;
+
+	if (buffer->length == 0)
+		return;
+
+	prev_char = g_utf8_find_prev_char(buffer->data,
+					  buffer->data + buffer->length - 1);
+	if (prev_char != NULL) {
+		buffer->length = prev_char - buffer->data + 1;
+		*prev_char = 0;
+	}
+}
+
+static void
 text_entry_commit(struct text_entry *entry, const char *text)
 {
 	buffer_set(&entry->preedit, "");
@@ -428,6 +444,33 @@ button_handler(struct widget *widget,
 }
 
 static void
+key_handler(struct window *window, struct input *input,
+	    uint32_t time, uint32_t key, uint32_t unicode,
+	    enum wl_keyboard_key_state state, void *data)
+{
+	struct editor *editor = data;
+	struct text_entry *active_entry;
+	struct buffer *buffer;
+	char *prev_char;
+
+	if (state == WL_KEYBOARD_KEY_STATE_RELEASED)
+		return;
+
+	if (editor->entry->active)
+		active_entry = editor->entry;
+	else if (editor->editor->active)
+		active_entry = editor->editor;
+	else
+		return;
+
+	/* Only handle backspace for now. This is a demo after all. */
+	if (unicode == XKB_KEY_BackSpace) {
+		buffer_delete_last_character(&active_entry->text);
+		widget_schedule_redraw(active_entry->widget);
+	}
+}
+
+static void
 global_handler(struct wl_display *display, uint32_t id,
 	       const char *interface, uint32_t version, void *data)
 {
@@ -460,6 +503,8 @@ main(int argc, char *argv[])
 	editor.editor = text_entry_create(&editor, "Editor");
 
 	window_set_title(editor.window, "Text Editor");
+	window_set_key_handler(editor.window, key_handler);
+	window_set_user_data(editor.window, &editor);
 
 	widget_set_redraw_handler(editor.widget, redraw_handler);
 	widget_set_resize_handler(editor.widget, resize_handler);

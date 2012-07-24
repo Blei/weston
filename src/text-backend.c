@@ -103,9 +103,20 @@ text_model_modifier(struct wl_keyboard_grab *grab, uint32_t serial,
 {
 	struct text_model *text_model = container_of(grab, struct text_model, grab);
 	struct input_method *input_method = text_model->input_method;
+	uint32_t new_serial;
 
-	uint32_t new_serial = wl_display_next_serial(input_method->ec->wl_display);
+	struct wl_resource *keyboard_focus =
+		text_model->grab.keyboard->focus_resource;
+
+	if (keyboard_focus) {
+		new_serial = wl_display_next_serial(input_method->ec->wl_display);
+		wl_keyboard_send_modifiers(keyboard_focus, new_serial,
+					   mods_depressed, mods_latched,
+					   mods_locked, group);
+	}
+
 	if (input_method->keyboard_binding) {
+		new_serial = wl_display_next_serial(input_method->ec->wl_display);
 		wl_keyboard_send_modifiers(input_method->keyboard_binding,
 					   new_serial, mods_depressed, mods_latched,
 					   mods_locked, group);
@@ -333,11 +344,36 @@ input_method_request_keyboard(struct wl_client *client,
 				seat->xkb_info.keymap_size);
 }
 
+static void
+input_method_forward_key(struct wl_client *client,
+			 struct wl_resource *resource,
+			 uint32_t time, uint32_t key, uint32_t state)
+{
+	struct input_method *input_method = resource->data;
+	struct wl_keyboard *keyboard;
+	struct wl_resource *focus_resource;
+	uint32_t serial;
+
+	if (!input_method->active_model)
+		return;
+
+	keyboard = input_method->active_model->grab.keyboard;
+	if (!keyboard)
+		return;
+
+	focus_resource = keyboard->focus_resource;
+	if (resource) {
+		serial = wl_display_next_serial(input_method->ec->wl_display);
+		wl_keyboard_send_key(focus_resource, serial, time, key, state);
+	}
+}
+
 static const struct input_method_interface input_method_implementation = {
 	input_method_commit_string,
 	input_method_preedit_string,
 	input_method_preedit_styling,
-	input_method_request_keyboard
+	input_method_request_keyboard,
+	input_method_forward_key
 };
 
 static void
