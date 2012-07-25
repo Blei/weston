@@ -35,6 +35,7 @@ struct text_model {
 	struct input_method *input_method;
 	struct wl_keyboard_grab grab;
 	struct wl_surface *surface;
+	uint32_t id;
 };
 
 struct input_method {
@@ -47,6 +48,7 @@ struct input_method {
 	struct weston_compositor *ec;
 	struct wl_list models;
 	struct text_model *active_model;
+	uint32_t id_counter;
 };
 
 static void
@@ -55,6 +57,8 @@ deactivate_text_model(struct text_model *text_model)
 	struct weston_compositor *ec = text_model->input_method->ec;
 	struct wl_keyboard_grab *grab = &text_model->grab;
 	struct input_method *input_method = text_model->input_method;
+	struct wl_resource *input_method_binding =
+		input_method->input_method_binding;
 
 	if (grab->keyboard && (grab->keyboard->grab == grab)) {
 		wl_keyboard_end_grab(grab->keyboard);
@@ -64,9 +68,10 @@ deactivate_text_model(struct text_model *text_model)
 	if (input_method->active_model == text_model) {
 		input_method->active_model = NULL;
 		wl_signal_emit(&ec->hide_input_panel_signal, ec);
-		if (input_method->input_method_binding) {
-			input_method_send_reset(input_method->input_method_binding);
-		}
+
+		if (input_method_binding)
+			input_method_send_focus_out(input_method_binding,
+						    text_model->id);
 	}
 }
 
@@ -75,8 +80,14 @@ destroy_text_model(struct wl_resource *resource)
 {
 	struct text_model *text_model =
 		container_of(resource, struct text_model, resource);
+	struct wl_resource *input_method_binding =
+		text_model->input_method->input_method_binding;
 
 	deactivate_text_model(text_model);
+
+	if (input_method_binding)
+		input_method_send_destroy_text_model(input_method_binding,
+						     text_model->id);
 
 	wl_list_remove(&text_model->link);
 	free(text_model);
@@ -147,21 +158,28 @@ text_model_activate(struct wl_client *client,
 	            struct wl_resource *resource)
 {
 	struct text_model *text_model = resource->data;
+	struct wl_resource *input_method_binding =
+		text_model->input_method->input_method_binding;
 	struct weston_compositor *ec = text_model->input_method->ec;
 
 	text_model->input_method->active_model = text_model;
 
 	wl_signal_emit(&ec->show_input_panel_signal, ec);
 
-	if (text_model->input_method->input_method_binding &&
-	    text_model->input_method->keyboard_binding) {
-		struct wl_seat *seat = &text_model->input_method->ec->seat->seat;
+	if (input_method_binding) {
+		input_method_send_focus_in(input_method_binding,
+					   text_model->id);
 
-		if (seat->keyboard->grab != &seat->keyboard->default_grab) {
-			wl_keyboard_end_grab(seat->keyboard);
+		if (text_model->input_method->keyboard_binding) {
+			struct wl_seat *seat =
+				&text_model->input_method->ec->seat->seat;
+
+			if (seat->keyboard->grab != &seat->keyboard->default_grab) {
+				wl_keyboard_end_grab(seat->keyboard);
+			}
+			wl_keyboard_start_grab(seat->keyboard, &text_model->grab);
+			weston_log("start keyboard grab\n");
 		}
-		wl_keyboard_start_grab(seat->keyboard, &text_model->grab);
-		weston_log("start keyboard grab\n");
 	}
 }
 
@@ -221,6 +239,8 @@ static void text_model_manager_create_text_model(struct wl_client *client,
 						 struct wl_resource *surface)
 {
 	struct input_method *input_method = resource->data;
+	struct wl_resource *input_method_binding =
+		input_method->input_method_binding;
 	struct text_model *text_model;
 
 	text_model = calloc(1, sizeof *text_model);
@@ -235,12 +255,17 @@ static void text_model_manager_create_text_model(struct wl_client *client,
 
 	text_model->input_method = input_method;
 	text_model->surface = container_of(surface, struct wl_surface, resource);
+	text_model->id = input_method->id_counter++;
 
 	text_model->grab.interface = &text_model_grab;
 
 	wl_client_add_resource(client, &text_model->resource);
 
 	wl_list_insert(&input_method->models, &text_model->link);
+
+	if (input_method_binding)
+		input_method_send_create_text_model(input_method_binding,
+						    text_model->id);
 };
 
 static const struct text_model_manager_interface text_model_manager_implementation = {
@@ -397,6 +422,7 @@ bind_input_method(struct wl_client *client,
 {
 	struct input_method *input_method = data;
 	struct wl_resource *resource;
+	struct text_model *text_model;
 
 	resource = wl_client_add_object(client, &input_method_interface,
 					&input_method_implementation,
@@ -405,6 +431,15 @@ bind_input_method(struct wl_client *client,
 	if (input_method->input_method_binding == NULL) {
 		resource->destroy = unbind_input_method;
 		input_method->input_method_binding = resource;
+
+		wl_list_for_each(text_model, &input_method->models, link) {
+			input_method_send_create_text_model(resource,
+							    text_model->id);
+		}
+
+		if (input_method->active_model)
+			input_method_send_focus_in(resource,
+						   input_method->active_model->id);
 		return;
 	}
 

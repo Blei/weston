@@ -109,5 +109,17 @@
     </request>
 
     <event name="reset"/>
+    <event name="create_text_model">
+      <arg name="text_model_id" type="uint"/>
+    </event>
+    <event name="destroy_text_model">
+      <arg name="text_model_id" type="uint"/>
+    </event>
+    <event name="focus_in">
+      <arg name="text_model_id" type="uint"/>
+    </event>
+    <event name="focus_out">
+      <arg name="text_model_id" type="uint"/>
+    </event>
   </interface>
 </protocol>
