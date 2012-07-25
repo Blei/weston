@@ -76,6 +76,14 @@ typedef enum {
 	STATE_ZY
 } hiragana_state;
 
+struct hiragana_ime_context {
+	struct wl_list link;
+	uint32_t text_model_id;
+
+	bool on;
+	hiragana_state state;
+};
+
 struct hiragana_ime {
 	struct display *display;
 	struct input_method *input_method;
@@ -91,9 +99,22 @@ struct hiragana_ime {
 		xkb_mod_mask_t shift_mask;
 	} xkb;
 
-	bool on;
-	hiragana_state state;
+	struct wl_list contexts;
+	struct hiragana_ime_context *active_context;
 };
+
+static struct hiragana_ime_context *
+find_context_for_id(struct hiragana_ime *ime, uint32_t id)
+{
+	struct hiragana_ime_context *context;
+
+	wl_list_for_each(context, &ime->contexts, link) {
+		if (context->text_model_id == id)
+			return context;
+	}
+
+	return NULL;
+}
 
 static const char *
 state_to_preedit(hiragana_state state)
@@ -354,46 +375,49 @@ static bool
 ime_handle_key(struct hiragana_ime *ime, uint32_t key, uint32_t sym,
 	       enum wl_keyboard_key_state state)
 {
+	struct hiragana_ime_context *context = ime->active_context;
 	const char *output;
 	bool handled;
 	const char *preedit_string;
+
+	assert(context && "no active context");
 
 	if (state != WL_KEYBOARD_KEY_STATE_PRESSED)
 		return false;
 
 	if (sym == ' ' && (ime->modifiers & ime->xkb.control_mask)) {
-		ime->on = !ime->on;
-		fprintf(stderr, "turning ime %s\n", ime->on ? "on" : "off");
-		if (!ime->on) {
+		context->on = !context->on;
+		fprintf(stderr, "turning ime %s\n", context->on ? "on" : "off");
+		if (!context->on) {
 			send_preedit(ime, "", 0);
-			ime->state = STATE_EMPTY;
+			context->state = STATE_EMPTY;
 		}
 		return true;
 	}
 
-	if (!ime->on)
+	if (!context->on)
 		return false;
 
 	output = NULL;
-	handled = update_state(ime->state, sym, &ime->state, &output);
+	handled = update_state(context->state, sym, &context->state, &output);
 
 	if (output && *output) {
 		fprintf(stderr, "committing '%s'\n", output);
 		input_method_commit_string(ime->input_method, output, -1);
 	}
 
-	if (ime->state != STATE_EMPTY || !(output && *output)) {
-		preedit_string = state_to_preedit(ime->state);
+	if (context->state != STATE_EMPTY || !(output && *output)) {
+		preedit_string = state_to_preedit(context->state);
 		send_preedit(ime, preedit_string, -1);
 	}
 
 	return handled;
 }
 
-static void reset_hiragana_ime(struct hiragana_ime *ime)
+static void reset_hiragana_ime_context(struct hiragana_ime_context *context)
 {
-	ime->on = false;
-	ime->state = STATE_EMPTY;
+	context->on = false;
+	context->state = STATE_EMPTY;
 }
 
 static void
@@ -401,8 +425,87 @@ input_method_reset(void *data,
 		   struct input_method *input_method)
 {
 	struct hiragana_ime *ime = data;
-	reset_hiragana_ime(ime);
+
+	if (ime->active_context)
+		reset_hiragana_ime_context(ime->active_context);
 }
+
+static void
+input_method_create_text_model(void *data,
+			       struct input_method *input_method,
+			       uint32_t text_model_id)
+{
+	struct hiragana_ime *ime = data;
+
+	struct hiragana_ime_context *context = calloc(1, sizeof *context);
+	context->text_model_id = text_model_id;
+	context->state = STATE_EMPTY;
+	context->on = false;
+	wl_list_insert(&ime->contexts, &context->link);
+}
+
+static void
+input_method_destroy_text_model(void *data,
+				struct input_method *input_method,
+				uint32_t text_model_id)
+{
+	struct hiragana_ime *ime = data;
+	struct hiragana_ime_context *context;
+
+	context = find_context_for_id(ime, text_model_id);
+	assert(context && "no context with given id");
+
+	if (ime->active_context == context)
+		ime->active_context = NULL;
+
+	wl_list_remove(&context->link);
+	free(context);
+}
+
+static void
+input_method_focus_in(void *data,
+		      struct input_method *input_method,
+		      uint32_t text_model_id)
+{
+	struct hiragana_ime *ime = data;
+	struct hiragana_ime_context *context;
+
+	context = find_context_for_id(ime, text_model_id);
+	assert(context && "no context with given id");
+
+	if (ime->active_context)
+		fprintf(stderr, "WARNING: existing active context with id %u\n",
+			ime->active_context->text_model_id);
+
+	ime->active_context = context;
+}
+
+static void
+input_method_focus_out(void *data,
+		       struct input_method *input_method,
+		       uint32_t text_model_id)
+{
+	struct hiragana_ime *ime = data;
+
+	if (!ime->active_context) {
+		fprintf(stderr, "WARNING: no active context\n");
+		return;
+	}
+
+	if (ime->active_context->text_model_id != text_model_id)
+		fprintf(stderr, "WARNING: existing active context with id %u\n",
+			ime->active_context->text_model_id);
+
+	ime->active_context = NULL;
+}
+
+static const struct input_method_listener input_method_listener = {
+	input_method_reset,
+	input_method_create_text_model,
+	input_method_destroy_text_model,
+	input_method_focus_in,
+	input_method_focus_out
+};
 
 static void
 input_method_keymap(void *data,
@@ -528,10 +631,6 @@ static const struct wl_keyboard_listener input_method_keyboard_listener = {
 	input_method_modifiers
 };
 
-static const struct input_method_listener input_method_listener = {
-	input_method_reset
-};
-
 static void
 global_handler(struct wl_display *display, uint32_t id,
 	       const char *interface, uint32_t version, void *data)
@@ -557,7 +656,7 @@ main(int argc, char *argv[])
 	struct hiragana_ime ime;
 	memset(&ime, 0, sizeof ime);
 
-	reset_hiragana_ime(&ime);
+	wl_list_init(&ime.contexts);
 
 	ime.xkb.context = xkb_context_new(0);
 	if (ime.xkb.context == NULL) {
