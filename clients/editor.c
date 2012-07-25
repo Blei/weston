@@ -389,10 +389,6 @@ text_entry_activate(struct text_entry *entry)
 static void
 text_entry_deactivate(struct text_entry *entry)
 {
-	if (entry->preedit.length > 1) {
-		buffer_set(&entry->preedit, "");
-		widget_schedule_redraw(entry->widget);
-	}
 	text_model_deactivate(entry->model);
 }
 
@@ -471,6 +467,27 @@ key_handler(struct window *window, struct input *input,
 }
 
 static void
+keyboard_focus_handler(struct window *window,
+		       struct input *device,
+		       void *data)
+{
+	struct editor *editor = data;
+
+	if (device == NULL) {
+		if (editor->entry->active)
+			text_entry_deactivate(editor->entry);
+		else if (editor->editor->active)
+			text_entry_deactivate(editor->editor);
+	} else {
+		if (editor->entry->active)
+			text_entry_activate(editor->entry);
+		else if (editor->editor->active)
+			text_entry_activate(editor->editor);
+	}
+
+}
+
+static void
 global_handler(struct wl_display *display, uint32_t id,
 	       const char *interface, uint32_t version, void *data)
 {
@@ -504,6 +521,8 @@ main(int argc, char *argv[])
 
 	window_set_title(editor.window, "Text Editor");
 	window_set_key_handler(editor.window, key_handler);
+	window_set_keyboard_focus_handler(editor.window,
+					  keyboard_focus_handler);
 	window_set_user_data(editor.window, &editor);
 
 	widget_set_redraw_handler(editor.widget, redraw_handler);
