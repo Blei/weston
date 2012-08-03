@@ -34,6 +34,7 @@
 struct virtual_keyboard {
 	struct input_panel *input_panel;
 	struct input_method *input_method;
+	struct input_method_context *active_context;
 	struct display *display;
 };
 
@@ -113,8 +114,10 @@ button_handler(struct widget *widget,
 	       enum wl_pointer_button_state state, void *data)
 {
 	struct keyboard *keyboard = data;
+	struct input_method_context *context =
+		keyboard->keyboard->active_context;
 	struct rectangle allocation;
-	int32_t x, y;	
+	int32_t x, y;
 	char text[] = { '0', '\0' };
 
 	if (state != WL_POINTER_BUTTON_STATE_PRESSED || button != BTN_LEFT) {
@@ -129,10 +132,81 @@ button_handler(struct widget *widget,
 
 	text[0] = y / keyboard->cy * 10 + x / keyboard->cx + '0';
 
-	input_method_commit_string(keyboard->keyboard->input_method, text, -1);
+	input_method_context_commit_string(context, text, -1);
 
 	widget_schedule_redraw(widget);
 }
+
+static void
+input_method_context_focus_in(void *data,
+			      struct input_method_context *input_method_context)
+{
+	struct virtual_keyboard *keyboard = data;
+
+	if (keyboard->active_context)
+		fprintf(stderr, "WARNING: existing active context\n");
+
+	keyboard->active_context = input_method_context;
+}
+
+static void
+input_method_context_focus_out(void *data,
+			       struct input_method_context *input_method_context)
+{
+	struct virtual_keyboard *keyboard = data;
+
+	if (!keyboard->active_context) {
+		fprintf(stderr, "WARNING: no active context\n");
+		return;
+	}
+
+	if (keyboard->active_context != input_method_context)
+		fprintf(stderr, "WARNING: existing active context\n");
+
+	keyboard->active_context = NULL;
+}
+
+static void
+input_method_context_reset(void *data,
+			   struct input_method_context *input_method_context)
+{
+	/* struct virtual_keyboard *keyboard = data; */
+}
+
+static void
+input_method_context_destroy_me(void *data,
+				struct input_method_context *input_method_context)
+{
+	struct virtual_keyboard *keyboard = data;
+
+	if (keyboard->active_context == input_method_context)
+		keyboard->active_context = NULL;
+
+	input_method_context_destroy(input_method_context);
+}
+
+static const
+struct input_method_context_listener input_method_context_listener = {
+	input_method_context_focus_in,
+	input_method_context_focus_out,
+	input_method_context_reset,
+	input_method_context_destroy_me,
+};
+
+static void
+input_method_create_context(void *data,
+			    struct input_method *input_method,
+			    struct input_method_context *context)
+{
+	struct keyboard *keyboard = data;
+	input_method_context_add_listener(context,
+					  &input_method_context_listener,
+					  keyboard);
+}
+
+static const struct input_method_listener input_method_listener = {
+	input_method_create_context,
+};
 
 static void
 global_handler(struct wl_display *display, uint32_t id,
@@ -144,6 +218,9 @@ global_handler(struct wl_display *display, uint32_t id,
 		keyboard->input_panel = wl_display_bind(display, id, &input_panel_interface);
 	} else if (!strcmp(interface, "input_method")) {
 		keyboard->input_method = wl_display_bind(display, id, &input_method_interface);
+		input_method_add_listener(keyboard->input_method,
+					  &input_method_listener,
+					  keyboard);
 	}
 }
 
@@ -200,6 +277,7 @@ main(int argc, char *argv[])
 		fprintf(stderr, "failed to create display: %m\n");
 		return -1;
 	}
+	virtual_keyboard.active_context = NULL;
 
 	wl_display_add_global_listener(display_get_display(virtual_keyboard.display),
 				       global_handler, &virtual_keyboard);

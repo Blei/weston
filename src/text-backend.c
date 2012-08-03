@@ -20,6 +20,8 @@
  * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <assert.h>
+#include <stdbool.h>
 #include <stdlib.h>
 
 #include "compositor.h"
@@ -27,8 +29,14 @@
 
 struct input_method;
 
-struct text_model {
+struct input_method_context {
 	struct wl_resource resource;
+	bool disabled;
+};
+
+struct text_model {
+	struct wl_resource text_model_resource;
+	struct input_method_context *context;
 
 	struct wl_list link;
 
@@ -52,13 +60,110 @@ struct input_method {
 };
 
 static void
+input_method_context_commit_string(struct wl_client *client,
+				   struct wl_resource *resource,
+				   const char *text,
+				   uint32_t index)
+{
+	struct text_model *text_model;
+	struct input_method_context *context =
+		container_of(resource, struct input_method_context, resource);
+
+	if (context->disabled)
+		return;
+
+	text_model = resource->data;
+	text_model_send_commit_string(&text_model->text_model_resource,
+				      text, index);
+}
+
+static void
+input_method_context_preedit_string(struct wl_client *client,
+				    struct wl_resource *resource,
+				    const char *text,
+				    uint32_t index)
+{
+	struct text_model *text_model;
+	struct input_method_context *context =
+		container_of(resource, struct input_method_context, resource);
+
+	if (context->disabled)
+		return;
+
+	text_model = resource->data;
+	text_model_send_preedit_string(&text_model->text_model_resource,
+				       text, index);
+}
+
+static void
+input_method_context_preedit_styling(struct wl_client *client,
+				     struct wl_resource *resource,
+				     uint32_t type,
+				     uint32_t value,
+				     uint32_t start,
+				     uint32_t end)
+{
+	struct text_model *text_model;
+	struct input_method_context *context =
+		container_of(resource, struct input_method_context, resource);
+
+	if (context->disabled)
+		return;
+
+	text_model = resource->data;
+	text_model_send_preedit_styling(&text_model->text_model_resource,
+					type, value, start, end);
+}
+
+static void
+input_method_context_forward_key(struct wl_client *client,
+				 struct wl_resource *resource,
+				 uint32_t time, uint32_t key, uint32_t state)
+{
+	struct text_model *text_model;
+	struct input_method *input_method;
+	struct wl_keyboard *keyboard;
+	struct wl_resource *focus_resource;
+	uint32_t serial;
+
+	struct input_method_context *context =
+		container_of(resource, struct input_method_context, resource);
+
+	if (context->disabled)
+		return;
+
+	text_model = resource->data;
+	input_method = text_model->input_method;
+
+	if (input_method->active_model != text_model)
+		return;
+
+	keyboard = text_model->grab.keyboard;
+	if (!keyboard)
+		return;
+
+	focus_resource = keyboard->focus_resource;
+	if (focus_resource) {
+		serial = wl_display_next_serial(input_method->ec->wl_display);
+		wl_keyboard_send_key(focus_resource, serial, time, key, state);
+	}
+}
+
+static const
+struct input_method_context_interface input_method_context_implementation = {
+	input_method_context_commit_string,
+	input_method_context_preedit_string,
+	input_method_context_preedit_styling,
+	input_method_context_forward_key
+};
+
+static void
 deactivate_text_model(struct text_model *text_model)
 {
 	struct weston_compositor *ec = text_model->input_method->ec;
 	struct wl_keyboard_grab *grab = &text_model->grab;
 	struct input_method *input_method = text_model->input_method;
-	struct wl_resource *input_method_binding =
-		input_method->input_method_binding;
+	struct wl_resource *context_resource = &text_model->context->resource;
 
 	if (grab->keyboard && (grab->keyboard->grab == grab)) {
 		wl_keyboard_end_grab(grab->keyboard);
@@ -69,9 +174,8 @@ deactivate_text_model(struct text_model *text_model)
 		input_method->active_model = NULL;
 		wl_signal_emit(&ec->hide_input_panel_signal, ec);
 
-		if (input_method_binding)
-			input_method_send_focus_out(input_method_binding,
-						    text_model->id);
+		if (context_resource)
+			input_method_context_send_focus_out(context_resource);
 	}
 }
 
@@ -79,15 +183,16 @@ static void
 destroy_text_model(struct wl_resource *resource)
 {
 	struct text_model *text_model =
-		container_of(resource, struct text_model, resource);
-	struct wl_resource *input_method_binding =
-		text_model->input_method->input_method_binding;
+		container_of(resource, struct text_model, text_model_resource);
+	struct input_method_context *context = text_model->context;
 
 	deactivate_text_model(text_model);
 
-	if (input_method_binding)
-		input_method_send_destroy_text_model(input_method_binding,
-						     text_model->id);
+	if (context) {
+		context->disabled = true;
+		context->resource.data = NULL;
+		input_method_context_send_destroy_me(&context->resource);
+	}
 
 	wl_list_remove(&text_model->link);
 	free(text_model);
@@ -158,17 +263,15 @@ text_model_activate(struct wl_client *client,
 	            struct wl_resource *resource)
 {
 	struct text_model *text_model = resource->data;
-	struct wl_resource *input_method_binding =
-		text_model->input_method->input_method_binding;
+	struct wl_resource *context_resource = &text_model->context->resource;
 	struct weston_compositor *ec = text_model->input_method->ec;
 
 	text_model->input_method->active_model = text_model;
 
 	wl_signal_emit(&ec->show_input_panel_signal, ec);
 
-	if (input_method_binding) {
-		input_method_send_focus_in(input_method_binding,
-					   text_model->id);
+	if (context_resource) {
+		input_method_context_send_focus_in(context_resource);
 
 		if (text_model->input_method->keyboard_binding) {
 			struct wl_seat *seat =
@@ -233,10 +336,59 @@ struct text_model_interface text_model_implementation = {
 	text_model_set_content_type
 };
 
-static void text_model_manager_create_text_model(struct wl_client *client,
-						 struct wl_resource *resource,
-						 uint32_t id,
-						 struct wl_resource *surface)
+static void
+destroy_input_method_context(struct wl_resource *resource)
+{
+	struct input_method_context *context =
+		container_of(resource, struct input_method_context, resource);
+	struct text_model *text_model;
+
+	text_model = resource->data;
+
+	if (text_model) {
+		assert(text_model->context == context);
+		text_model->context = NULL;
+	}
+
+	free(context);
+}
+
+static void
+create_input_method_context(struct input_method *input_method,
+			    struct text_model *text_model)
+{
+	struct input_method_context *context;
+
+	assert(!text_model->context);
+
+	context = malloc(sizeof *context);
+	if (!context) {
+		// TODO post error
+		return;
+	}
+
+	text_model->context = context;
+
+	context->resource.destroy = destroy_input_method_context;
+	context->resource.object.id = 0;
+	context->resource.object.interface = &input_method_context_interface;
+	context->resource.object.implementation =
+		(void (**)(void)) &input_method_context_implementation;
+	context->resource.data = text_model;
+	context->disabled = false;
+
+	wl_client_add_resource(input_method->input_method_binding->client,
+			       &context->resource);
+
+	input_method_send_create_context(input_method->input_method_binding,
+					 &context->resource);
+}
+
+static void
+text_model_manager_create_text_model(struct wl_client *client,
+				     struct wl_resource *resource,
+				     uint32_t id,
+				     struct wl_resource *surface)
 {
 	struct input_method *input_method = resource->data;
 	struct wl_resource *input_method_binding =
@@ -245,13 +397,13 @@ static void text_model_manager_create_text_model(struct wl_client *client,
 
 	text_model = calloc(1, sizeof *text_model);
 
-	text_model->resource.destroy = destroy_text_model;
+	text_model->text_model_resource.destroy = destroy_text_model;
 
-	text_model->resource.object.id = id;
-	text_model->resource.object.interface = &text_model_interface;
-	text_model->resource.object.implementation =
+	text_model->text_model_resource.object.id = id;
+	text_model->text_model_resource.object.interface = &text_model_interface;
+	text_model->text_model_resource.object.implementation =
 		(void (**)(void)) &text_model_implementation;
-	text_model->resource.data = text_model;
+	text_model->text_model_resource.data = text_model;
 
 	text_model->input_method = input_method;
 	text_model->surface = container_of(surface, struct wl_surface, resource);
@@ -259,13 +411,12 @@ static void text_model_manager_create_text_model(struct wl_client *client,
 
 	text_model->grab.interface = &text_model_grab;
 
-	wl_client_add_resource(client, &text_model->resource);
+	wl_client_add_resource(client, &text_model->text_model_resource);
 
 	wl_list_insert(&input_method->models, &text_model->link);
 
 	if (input_method_binding)
-		input_method_send_create_text_model(input_method_binding,
-						    text_model->id);
+		create_input_method_context(input_method, text_model);
 };
 
 static const struct text_model_manager_interface text_model_manager_implementation = {
@@ -285,50 +436,6 @@ bind_text_model_manager(struct wl_client *client,
 	wl_client_add_object(client, &text_model_manager_interface,
 			     &text_model_manager_implementation,
 			     id, input_method);
-}
-
-static void
-input_method_commit_string(struct wl_client *client,
-			   struct wl_resource *resource,
-			   const char *text,
-			   uint32_t index)
-{
-	struct input_method *input_method = resource->data;
-
-	if (input_method->active_model) {
-		text_model_send_commit_string(&input_method->active_model->resource, text, index);
-	}
-}
-
-static void
-input_method_preedit_string(struct wl_client *client,
-			    struct wl_resource *resource,
-			    const char *text,
-			    uint32_t index)
-{
-	struct input_method *input_method = resource->data;
-
-	if (input_method->active_model) {
-		text_model_send_preedit_string(
-		    &input_method->active_model->resource, text, index);
-	}
-}
-
-static void
-input_method_preedit_styling(struct wl_client *client,
-			     struct wl_resource *resource,
-			     uint32_t type,
-			     uint32_t value,
-			     uint32_t start,
-			     uint32_t end)
-{
-	struct input_method *input_method = resource->data;
-
-	if (input_method->active_model) {
-		text_model_send_preedit_styling(
-		    &input_method->active_model->resource,
-		    type, value, start, end);
-	}
 }
 
 static void
@@ -369,36 +476,8 @@ input_method_request_keyboard(struct wl_client *client,
 				seat->xkb_info.keymap_size);
 }
 
-static void
-input_method_forward_key(struct wl_client *client,
-			 struct wl_resource *resource,
-			 uint32_t time, uint32_t key, uint32_t state)
-{
-	struct input_method *input_method = resource->data;
-	struct wl_keyboard *keyboard;
-	struct wl_resource *focus_resource;
-	uint32_t serial;
-
-	if (!input_method->active_model)
-		return;
-
-	keyboard = input_method->active_model->grab.keyboard;
-	if (!keyboard)
-		return;
-
-	focus_resource = keyboard->focus_resource;
-	if (resource) {
-		serial = wl_display_next_serial(input_method->ec->wl_display);
-		wl_keyboard_send_key(focus_resource, serial, time, key, state);
-	}
-}
-
 static const struct input_method_interface input_method_implementation = {
-	input_method_commit_string,
-	input_method_preedit_string,
-	input_method_preedit_styling,
-	input_method_request_keyboard,
-	input_method_forward_key
+	input_method_request_keyboard
 };
 
 static void
@@ -432,14 +511,12 @@ bind_input_method(struct wl_client *client,
 		resource->destroy = unbind_input_method;
 		input_method->input_method_binding = resource;
 
-		wl_list_for_each(text_model, &input_method->models, link) {
-			input_method_send_create_text_model(resource,
-							    text_model->id);
-		}
+		wl_list_for_each(text_model, &input_method->models, link)
+			create_input_method_context(input_method, text_model);
 
 		if (input_method->active_model)
-			input_method_send_focus_in(resource,
-						   input_method->active_model->id);
+			input_method_context_send_focus_in(
+			    &input_method->active_model->context->resource);
 		return;
 	}
 

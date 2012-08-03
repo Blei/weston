@@ -85,6 +85,16 @@
   </interface>
 
   <interface name="input_method" version="1">
+    <request name="request_keyboard">
+      <arg name="keyboard" type="new_id" interface="wl_keyboard"/>
+    </request>
+
+    <event name="create_context">
+      <arg name="id" type="new_id" interface="input_method_context"/>
+    </event>
+  </interface>
+
+  <interface name="input_method_context" version="1">
     <request name="commit_string">
       <arg name="text" type="string"/>
       <arg name="index" type="uint"/>
@@ -99,27 +109,15 @@
       <arg name="start" type="uint"/>
       <arg name="end" type="uint"/>
     </request>
-    <request name="request_keyboard">
-      <arg name="keyboard" type="new_id" interface="wl_keyboard"/>
-    </request>
     <request name="forward_key">
       <arg name="time" type="uint"/>
       <arg name="key" type="uint"/>
       <arg name="state" type="uint"/>
     </request>
 
+    <event name="focus_in"/>
+    <event name="focus_out"/>
     <event name="reset"/>
-    <event name="create_text_model">
-      <arg name="text_model_id" type="uint"/>
-    </event>
-    <event name="destroy_text_model">
-      <arg name="text_model_id" type="uint"/>
-    </event>
-    <event name="focus_in">
-      <arg name="text_model_id" type="uint"/>
-    </event>
-    <event name="focus_out">
-      <arg name="text_model_id" type="uint"/>
-    </event>
+    <event name="destroy_me"/>
   </interface>
 </protocol>
