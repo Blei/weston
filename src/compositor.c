@@ -693,6 +693,8 @@ destroy_surface(struct wl_resource *resource)
 
 	if (weston_surface_is_mapped(surface))
 		weston_surface_unmap(surface);
+	else if (surface->layer_link.next)
+		wl_list_remove(&surface->layer_link);
 
 	glDeleteTextures(surface->num_textures, surface->textures);
 
