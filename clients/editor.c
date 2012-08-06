@@ -251,6 +251,25 @@ text_entry_destroy(struct text_entry *entry)
 }
 
 static void
+update_cursor_location(struct text_entry *entry,
+		       int32_t x, int32_t y,
+		       int32_t text_height)
+{
+	struct rectangle w_allocation;
+	int32_t final_x, final_y;
+
+	widget_get_allocation(entry->widget, &w_allocation);
+	final_x = w_allocation.x + entry->allocation.x + x;
+	final_y = w_allocation.y + entry->allocation.y + y;
+
+	text_model_set_cursor_rectangle(entry->model,
+					final_x,
+					final_y,
+					2, /* hardcoded, not sure if relevant */
+					text_height);
+}
+
+static void
 text_entry_draw(struct text_entry *entry, cairo_t *cr)
 {
 	PangoLayout *layout;
@@ -264,7 +283,8 @@ text_entry_draw(struct text_entry *entry, cairo_t *cr)
 	cairo_save(cr);
 	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 
-	cairo_rectangle(cr, entry->allocation.x, entry->allocation.y, entry->allocation.width, entry->allocation.height);
+	cairo_rectangle(cr, entry->allocation.x, entry->allocation.y,
+			entry->allocation.width, entry->allocation.height);
 	cairo_clip(cr);
 
 	cairo_translate(cr, entry->allocation.x, entry->allocation.y);
@@ -300,13 +320,21 @@ text_entry_draw(struct text_entry *entry, cairo_t *cr)
 	pango_cairo_show_layout(cr, layout);
 
 	pango_layout_set_text(layout, entry->preedit.data, -1);
+
 	pango_layout_set_attributes(layout, entry->attr_list);
 	cairo_translate(cr, text_width, 0);
 	pango_cairo_show_layout(cr, layout);
 
+	pango_layout_get_size(layout, &width, NULL);
+	text_width += (double) width / PANGO_SCALE;
+
 	g_object_unref(layout);
 
 	cairo_restore(cr);
+
+	update_cursor_location(entry, 10 + (int32_t) text_width,
+			       (int32_t) text_start_height,
+			       (int32_t) text_height);
 }
 
 static void

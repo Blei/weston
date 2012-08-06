@@ -12,7 +12,11 @@
       <arg name="text" type="string"/>
       <arg name="index" type="int"/>
     </request>
-    <request name="set_micro_focus">
+    <request name="set_cursor_rectangle">
+      <description summary="set the cursor rectangle">
+        Set the cursor rectangle of the text model. The x and y represent the
+        top left corner of the cursor relative to the client window.
+      </description>
       <arg name="x" type="int"/>
       <arg name="y" type="int"/>
       <arg name="width" type="int"/>
@@ -118,6 +122,16 @@
     <event name="focus_in"/>
     <event name="focus_out"/>
     <event name="reset"/>
+    <event name="set_cursor_rectangle">
+      <description summary="set the cursor rectangle">
+        Set the cursor rectangle of the text model. The x and y represent the
+        top left corner of the cursor in the global coordinate system.
+      </description>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+    </event>
     <event name="destroy_me"/>
   </interface>
 </protocol>

@@ -304,13 +304,27 @@ text_model_set_selected_text(struct wl_client *client,
 }
 
 static void
-text_model_set_micro_focus(struct wl_client *client,
-			   struct wl_resource *resource,
-			   int32_t x,
-			   int32_t y,
-			   int32_t width,
-			   int32_t height)
+text_model_set_cursor_rectangle(struct wl_client *client,
+				struct wl_resource *resource,
+				int32_t x,
+				int32_t y,
+				int32_t width,
+				int32_t height)
 {
+	struct text_model *text_model = resource->data;
+	struct wl_surface *surface = text_model->surface;
+	struct weston_surface *ws =
+		container_of(surface, struct weston_surface, surface);
+	GLfloat global_x, global_y;
+
+	if (text_model->context) {
+		weston_surface_to_global_float(ws, x, y, &global_x, &global_y);
+		input_method_context_send_set_cursor_rectangle(
+		    &text_model->context->resource,
+		    (int32_t) global_x,
+		    (int32_t) global_y,
+		    width, height);
+	}
 }
 
 static void
@@ -331,7 +345,7 @@ struct text_model_interface text_model_implementation = {
 	text_model_activate,
 	text_model_deactivate,
 	text_model_set_selected_text,
-	text_model_set_micro_focus,
+	text_model_set_cursor_rectangle,
 	text_model_set_preedit,
 	text_model_set_content_type
 };
