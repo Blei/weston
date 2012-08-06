@@ -1918,8 +1918,17 @@ static void
 panel_configure(struct weston_surface *es, int32_t sx, int32_t sy)
 {
 	struct desktop_shell *shell = es->private;
+	struct weston_surface *s;
 
-	configure_static_surface(es, &shell->panel_layer);
+	weston_surface_configure(es, es->output->x, es->output->y,
+				 es->buffer->width, es->buffer->height);
+
+	wl_list_for_each(s, &shell->panel_layer.surface_list, layer_link)
+		if (s == es)
+			return;
+
+	wl_list_insert(&shell->panel_layer.surface_list, &es->layer_link);
+	weston_compositor_schedule_repaint(es->compositor);
 }
 
 static void
