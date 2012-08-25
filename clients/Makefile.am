@@ -52,6 +52,7 @@ clients_programs =				\
 	smoke					\
 	resizor					\
 	eventdemo				\
+	relative-grab-demo			\
 	clickdot				\
 	editor					\
 	keyboard				\
@@ -97,6 +98,9 @@ resizor_LDADD = $(toolkit_libs)
 
 eventdemo_SOURCES = eventdemo.c
 eventdemo_LDADD = $(toolkit_libs)
+
+relative_grab_demo_SOURCES = relative-grab-demo.c
+relative_grab_demo_LDADD = $(toolkit_libs)
 
 clickdot_SOURCES = clickdot.c
 clickdot_LDADD = $(toolkit_libs)
