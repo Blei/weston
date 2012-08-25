@@ -398,6 +398,8 @@ x11_output_set_wm_protocols(struct x11_output *output)
 static void
 x11_output_change_state(struct x11_output *output, int add, xcb_atom_t state)
 {
+	xcb_void_cookie_t cookie;
+	xcb_generic_error_t *error;
 	xcb_client_message_event_t event;
 	struct x11_compositor *c =
 		(struct x11_compositor *) output->base.compositor;
@@ -420,10 +422,15 @@ x11_output_change_state(struct x11_output *output, int add, xcb_atom_t state)
 	event.data.data32[4] = 0;
 
 	iter = xcb_setup_roots_iterator(xcb_get_setup(c->conn));
-	xcb_send_event(c->conn, 0, iter.data->root,
+	cookie = xcb_send_event_checked(c->conn, 0, iter.data->root,
 		       XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY |
 		       XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT,
 		       (void *) &event);
+	error = xcb_request_check(c->conn, cookie);
+	if (error) {
+		weston_log("error changing x11 output state, code %u\n",
+			   error->error_code);
+	}
 }
 
 
@@ -878,8 +885,9 @@ x11_compositor_handle_event(int fd, uint32_t mask, void *data)
 			output = x11_compositor_find_output(c, motion_notify->event);
 			x = wl_fixed_from_int(output->base.x + motion_notify->event_x);
 			y = wl_fixed_from_int(output->base.y + motion_notify->event_y);
-			notify_motion(&c->core_seat,
-				      weston_compositor_get_time(), x, y);
+			notify_motion_absolute(&c->core_seat,
+					       weston_compositor_get_time(),
+					       x, y);
 			break;
 
 		case XCB_EXPOSE:
@@ -996,6 +1004,7 @@ x11_compositor_get_resources(struct x11_compositor *c)
 
 	xcb_intern_atom_cookie_t cookies[ARRAY_LENGTH(atoms)];
 	xcb_intern_atom_reply_t *reply;
+	xcb_generic_error_t *error;
 	xcb_pixmap_t pixmap;
 	xcb_gc_t gc;
 	unsigned int i;
@@ -1007,8 +1016,13 @@ x11_compositor_get_resources(struct x11_compositor *c)
 					      atoms[i].name);
 
 	for (i = 0; i < ARRAY_LENGTH(atoms); i++) {
-		reply = xcb_intern_atom_reply (c->conn, cookies[i], NULL);
-		*(xcb_atom_t *) ((char *) c + atoms[i].offset) = reply->atom;
+		error = NULL;
+		reply = xcb_intern_atom_reply (c->conn, cookies[i], &error);
+		if (error)
+			weston_log("error interning atom %s, code %u\n",
+				   atoms[i].name, error->error_code);
+		else
+			*(xcb_atom_t *) ((char *) c + atoms[i].offset) = reply->atom;
 		free(reply);
 	}
 

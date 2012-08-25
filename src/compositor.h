@@ -501,8 +501,11 @@ weston_surface_draw(struct weston_surface *es,
 		    struct weston_output *output, pixman_region32_t *damage);
 
 void
-notify_motion(struct weston_seat *seat, uint32_t time,
-	      wl_fixed_t x, wl_fixed_t y);
+notify_motion_relative(struct weston_seat *seat, uint32_t time,
+		       wl_fixed_t x, wl_fixed_t y);
+void
+notify_motion_absolute(struct weston_seat *seat, uint32_t time,
+		       wl_fixed_t x, wl_fixed_t y);
 void
 notify_button(struct weston_seat *seat, uint32_t time, int32_t button,
 	      enum wl_pointer_button_state state);

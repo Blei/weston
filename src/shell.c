@@ -221,6 +221,15 @@ struct rotate_grab {
 	} center;
 };
 
+struct relative_grab {
+	struct shell_grab base;
+	bool grab_active;
+	struct wl_resource *resource;
+	struct wl_listener keyboard_focus_listener;
+
+	wl_fixed_t x, y;
+};
+
 static void
 activate(struct desktop_shell *shell, struct weston_surface *es,
 	 struct weston_seat *seat);
@@ -267,11 +276,13 @@ shell_grab_start(struct shell_grab *grab,
 		 const struct wl_pointer_grab_interface *interface,
 		 struct shell_surface *shsurf,
 		 struct wl_pointer *pointer,
-		 enum desktop_shell_cursor cursor)
+		 enum desktop_shell_cursor cursor,
+		 int is_relative)
 {
 	struct desktop_shell *shell = shsurf->shell;
 
 	grab->grab.interface = interface;
+	grab->grab.is_relative = is_relative;
 	grab->shsurf = shsurf;
 	grab->shsurf_destroy_listener.notify = destroy_shell_grab_shsurf;
 	wl_signal_add(&shsurf->resource.destroy_signal,
@@ -821,7 +832,7 @@ surface_move(struct shell_surface *shsurf, struct weston_seat *ws)
 			ws->seat.pointer->grab_y;
 
 	shell_grab_start(&move->base, &move_grab_interface, shsurf,
-			 ws->seat.pointer, DESKTOP_SHELL_CURSOR_MOVE);
+			 ws->seat.pointer, DESKTOP_SHELL_CURSOR_MOVE, 0);
 
 	return 0;
 }
@@ -840,6 +851,143 @@ shell_surface_move(struct wl_client *client, struct wl_resource *resource,
 
 	if (surface_move(shsurf, ws) < 0)
 		wl_resource_post_no_memory(resource);
+}
+
+static void
+relative_grab_motion(struct wl_pointer_grab *grab,
+		     uint32_t time, wl_fixed_t dx, wl_fixed_t dy)
+{
+	struct relative_grab *relative_grab = (struct relative_grab *) grab;
+
+	wl_relative_grab_send_motion(relative_grab->resource,
+				     time, dx, dy);
+}
+
+static void
+relative_grab_button(struct wl_pointer_grab *grab,
+		     uint32_t time, uint32_t button, uint32_t state_w)
+{
+	struct relative_grab *relative_grab = (struct relative_grab *) grab;
+	struct wl_resource *resource;
+	uint32_t serial;
+
+	resource = relative_grab->base.pointer->focus_resource;
+	assert(resource);
+
+	serial = wl_display_next_serial(
+	    wl_client_get_display(resource->client));
+
+	wl_pointer_send_button(resource, serial, time, button, state_w);
+}
+
+static const struct wl_pointer_grab_interface relative_grab_interface = {
+	noop_grab_focus,
+	relative_grab_motion,
+	relative_grab_button,
+};
+
+static void
+relative_grab_ungrab(struct relative_grab *relative_grab)
+{
+	wl_list_remove(&relative_grab->keyboard_focus_listener.link);
+	shell_grab_end(&relative_grab->base);
+	relative_grab->grab_active = false;
+}
+
+static void
+relative_grab_keyboard_focus_listener(struct wl_listener *listener,
+				      void *data)
+{
+	struct wl_keyboard *keyboard = data;
+	struct relative_grab *relative_grab =
+		container_of(listener, struct relative_grab,
+			     keyboard_focus_listener);
+
+	if (relative_grab->base.shsurf == NULL) {
+		/* shsurf has been destroyed */
+		relative_grab_ungrab(relative_grab);
+		return;
+	}
+
+	if (keyboard->focus != &relative_grab->base.shsurf->surface->surface) {
+		relative_grab_ungrab(relative_grab);
+		wl_relative_grab_send_destroy_me(relative_grab->resource);
+	}
+}
+
+static void
+relative_grab_destroy(struct wl_client *client, struct wl_resource *resource) {
+	struct relative_grab *relative_grab = resource->data;
+
+	wl_resource_destroy(resource);
+	if (relative_grab->grab_active)
+		relative_grab_ungrab(relative_grab);
+
+	free(relative_grab);
+}
+
+static const struct wl_relative_grab_interface relative_grab_listener = {
+	relative_grab_destroy,
+};
+
+static void
+shell_surface_relative_grab(struct wl_client *client,
+			    struct wl_resource *resource, uint32_t id,
+			    struct wl_resource *seat_resource, uint32_t serial)
+{
+	struct weston_seat *ws = seat_resource->data;
+	struct shell_surface *shsurf = resource->data;
+	struct relative_grab *relative_grab;
+	struct wl_resource *grab_resource;
+
+	/*
+	 * TODO: check that only one grab is active
+	if (shsurf->relative_grab.resource) {
+		wl_resource_post_error(resource,
+				       WL_DISPLAY_ERROR_INVALID_OBJECT,
+				       "shell_surface::relative_grab already requested");
+		return;
+	}
+	*/
+
+	relative_grab = calloc(1, sizeof *relative_grab);
+	if (relative_grab == NULL) {
+		wl_resource_post_no_memory(resource);
+		return;
+	}
+
+	grab_resource = wl_client_add_object(client,
+					     &wl_relative_grab_interface,
+					     &relative_grab_listener,
+					     id, relative_grab);
+	if (!grab_resource)
+		return;
+
+	relative_grab->resource = grab_resource;
+
+	/* Only grant grab when reacting to recent event and focused. */
+	if (ws->seat.pointer->grab_serial != serial ||
+	    ws->seat.pointer->focus != &shsurf->surface->surface) {
+
+		wl_relative_grab_send_destroy_me(grab_resource);
+		return;
+	}
+
+	relative_grab->keyboard_focus_listener.notify =
+		relative_grab_keyboard_focus_listener;
+	wl_signal_add(&ws->seat.keyboard->focus_signal,
+		      &relative_grab->keyboard_focus_listener);
+
+	relative_grab->x = ws->seat.pointer->x;
+	relative_grab->y = ws->seat.pointer->y;
+	relative_grab->grab_active = true;
+
+	shell_grab_start(&relative_grab->base,
+			 &relative_grab_interface,
+			 shsurf,
+			 ws->seat.pointer,
+			 DESKTOP_SHELL_CURSOR_NONE,
+			 1);
 }
 
 struct weston_resize_grab {
@@ -943,7 +1091,7 @@ surface_resize(struct shell_surface *shsurf,
 	resize->height = shsurf->surface->geometry.height;
 
 	shell_grab_start(&resize->base, &resize_grab_interface, shsurf,
-			 ws->seat.pointer, edges);
+			 ws->seat.pointer, edges, 0);
 
 	return 0;
 }
@@ -1020,7 +1168,7 @@ set_busy_cursor(struct shell_surface *shsurf, struct wl_pointer *pointer)
 		return;
 
 	shell_grab_start(grab, &busy_cursor_grab_interface, shsurf, pointer,
-			 DESKTOP_SHELL_CURSOR_BUSY);
+			 DESKTOP_SHELL_CURSOR_BUSY, 0);
 }
 
 static void
@@ -1666,6 +1814,7 @@ shell_surface_set_popup(struct wl_client *client,
 static const struct wl_shell_surface_interface shell_surface_implementation = {
 	shell_surface_pong,
 	shell_surface_move,
+	shell_surface_relative_grab,
 	shell_surface_resize,
 	shell_surface_set_toplevel,
 	shell_surface_set_transient,
@@ -2367,7 +2516,7 @@ rotate_binding(struct wl_seat *seat, uint32_t time, uint32_t button,
 	}
 
 	shell_grab_start(&rotate->base, &rotate_grab_interface, surface,
-			 seat->pointer, DESKTOP_SHELL_CURSOR_ARROW);
+			 seat->pointer, DESKTOP_SHELL_CURSOR_ARROW, 0);
 }
 
 static void

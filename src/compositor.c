@@ -1743,22 +1743,51 @@ clip_pointer_motion(struct weston_seat *seat, wl_fixed_t *fx, wl_fixed_t *fy)
 }
 
 WL_EXPORT void
-notify_motion(struct weston_seat *seat, uint32_t time, wl_fixed_t x, wl_fixed_t y)
+notify_motion_relative(struct weston_seat *seat, uint32_t time,
+		       wl_fixed_t dx, wl_fixed_t dy)
+{
+	struct wl_pointer *pointer = seat->seat.pointer;
+	struct weston_compositor *ec = seat->compositor;
+
+	if (!pointer->grab->is_relative) {
+		notify_motion_absolute(seat, time, pointer->x + dx,
+				       pointer->y + dy);
+		return;
+	}
+
+	weston_compositor_activity(ec);
+
+	pointer->grab->interface->motion(pointer->grab,
+					 time, dx, dy);
+}
+
+WL_EXPORT void
+notify_motion_absolute(struct weston_seat *seat, uint32_t time,
+		       wl_fixed_t x, wl_fixed_t y)
 {
 	const struct wl_pointer_grab_interface *interface;
 	struct weston_compositor *ec = seat->compositor;
 	struct weston_output *output;
 	struct wl_pointer *pointer = seat->seat.pointer;
+	wl_fixed_t dx, dy;
 	int32_t ix, iy;
-
-	weston_compositor_activity(ec);
 
 	clip_pointer_motion(seat, &x, &y);
 
-	weston_seat_update_drag_surface(seat, x - pointer->x, y - pointer->y);
+	dx = x - pointer->x;
+	dy = y - pointer->y;
 
 	pointer->x = x;
 	pointer->y = y;
+
+	if (pointer->grab->is_relative) {
+		notify_motion_relative(seat, time, dx, dy);
+		return;
+	}
+
+	weston_compositor_activity(ec);
+
+	weston_seat_update_drag_surface(seat, dx, dy);
 
 	ix = wl_fixed_to_int(x);
 	iy = wl_fixed_to_int(y);

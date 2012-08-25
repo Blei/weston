@@ -217,9 +217,9 @@ evdev_flush_motion(struct evdev_device *device, uint32_t time)
 		return;
 
 	if (device->pending_events & EVDEV_RELATIVE_MOTION) {
-		notify_motion(master, time,
-			      master->seat.pointer->x + device->rel.dx,
-			      master->seat.pointer->y + device->rel.dy);
+		notify_motion_relative(master, time,
+				       device->rel.dx,
+				       device->rel.dy);
 		device->pending_events &= ~EVDEV_RELATIVE_MOTION;
 		device->rel.dx = 0;
 		device->rel.dy = 0;
@@ -248,9 +248,9 @@ evdev_flush_motion(struct evdev_device *device, uint32_t time)
 		device->pending_events &= ~EVDEV_ABSOLUTE_MT_UP;
 	}
 	if (device->pending_events & EVDEV_ABSOLUTE_MOTION) {
-		notify_motion(master, time,
-			      wl_fixed_from_int(device->abs.x),
-			      wl_fixed_from_int(device->abs.y));
+		notify_motion_absolute(master, time,
+				       wl_fixed_from_int(device->abs.x),
+				       wl_fixed_from_int(device->abs.y));
 		device->pending_events &= ~EVDEV_ABSOLUTE_MOTION;
 	}
 }
