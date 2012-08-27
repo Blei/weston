@@ -25,6 +25,7 @@
 #include <config.h>
 #endif
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,6 +36,7 @@
 #include <linux/input.h>
 
 #include <xcb/xcb.h>
+#include <xcb/xinput.h>
 #ifdef HAVE_XCB_XKB
 #include <xcb/xkb.h>
 #endif
@@ -209,6 +211,89 @@ x11_compositor_setup_xkb(struct x11_compositor *c)
 #endif
 }
 
+static void
+open_xinput_pointer(struct x11_compositor *c, uint8_t id)
+{
+	xcb_generic_error_t *error = NULL;
+	xcb_input_open_device_reply_t *open_device_reply;
+	xcb_input_input_class_info_t *class_info;
+
+	// XXX this errors out, "bad device"...
+	open_device_reply =
+		xcb_input_open_device_reply(c->conn,
+					    xcb_input_open_device(c->conn, id),
+					    &error);
+	if (error) {
+		weston_log("error opening device with id %u, code %u\n",
+			   id, error->error_code);
+		return;
+	}
+
+	class_info = xcb_input_open_device_class_info(open_device_reply);
+
+
+	free(open_device_reply);
+}
+
+static void
+x11_compositor_setup_xinput(struct x11_compositor *c)
+{
+	xcb_generic_error_t *error = NULL;
+	xcb_input_list_input_devices_cookie_t devices_cookie;
+	xcb_input_list_input_devices_reply_t *devices_reply;
+	xcb_input_device_info_t *device_infos;
+	xcb_input_input_info_t *input_infos;
+	xcb_input_valuator_info_t *valuator_info;
+	xcb_input_axis_info_t *axis_infos;
+	int devices_count, i, j, k;
+
+	devices_cookie = xcb_input_list_input_devices(c->conn);
+	devices_reply = xcb_input_list_input_devices_reply(c->conn,
+							   devices_cookie,
+							   &error);
+	if (error) {
+		weston_log("error list input devices, code %u\n",
+			   error->error_code);
+		return;
+	}
+
+	device_infos = xcb_input_list_input_devices_devices(devices_reply);
+	devices_count = xcb_input_list_input_devices_devices_length(devices_reply);
+	weston_log("%d devices\n", devices_count);
+
+	input_infos = (void *) &device_infos[devices_count];
+
+	for (i = 0; i < devices_count; ++i, ++device_infos) {
+		bool found = false;
+		if (device_infos->device_use == XCB_INPUT_DEVICE_USE_IS_X_POINTER) {
+			found = true;
+			open_xinput_pointer(c, device_infos->device_id);
+			weston_log("found xpointer %d, classes %d\n", i,
+				   device_infos->num_class_info);
+		}
+
+		for (j = 0; j < device_infos->num_class_info; ++j) {
+			if (input_infos->class_id == XCB_INPUT_INPUT_CLASS_VALUATOR
+			    && found) {
+				valuator_info = (xcb_input_valuator_info_t*) input_infos;
+				weston_log("valuator mode, axes %d, mode %d\n",
+					   valuator_info->axes_len, valuator_info->mode);
+				axis_infos = (void*) &valuator_info[1];
+				for (k = 0; k < valuator_info->axes_len; ++k) {
+					weston_log("axis %d, res %u, min/max %d/%d\n",
+						   k, axis_infos[k].resolution,
+						   axis_infos[k].minimum,
+						   axis_infos[k].maximum);
+				}
+			}
+			// do something with *input_infos
+			input_infos = (void*) input_infos + input_infos->len;
+		}
+	}
+
+	free(devices_reply);
+}
+
 static int
 x11_input_create(struct x11_compositor *c, int no_input)
 {
@@ -221,6 +306,7 @@ x11_input_create(struct x11_compositor *c, int no_input)
 
 	weston_seat_init_pointer(&c->core_seat);
 
+	x11_compositor_setup_xinput(c);
 	x11_compositor_setup_xkb(c);
 
 	keymap = x11_compositor_get_keymap(c);
